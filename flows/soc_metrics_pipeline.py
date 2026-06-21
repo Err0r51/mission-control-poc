@@ -1,9 +1,20 @@
-"""Phase 1 scaffold for the parent SOC metrics pipeline flow."""
+"""Parent Prefect flow that runs the SOC metrics pipeline end to end."""
 
-from prefect import flow
+from prefect import flow, get_run_logger
+
+from flows.build_analytics import build_analytics
+from flows.ingest_raw import ingest_raw
 
 
 @flow(name="soc_metrics_pipeline")
 def soc_metrics_pipeline() -> None:
-    """Placeholder parent flow body added in later implementation phases."""
-    return None
+    """Run raw ingestion and analytics rebuild in sequence."""
+    logger = get_run_logger()
+
+    logger.info("Starting raw ingestion flow.")
+    ingest_raw()
+
+    logger.info("Starting analytics rebuild flow.")
+    build_analytics()
+
+    logger.info("Completed SOC metrics pipeline.")

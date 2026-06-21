@@ -1,13 +1,4 @@
 CREATE TABLE analytics.case_metrics AS
-WITH case_domain_input AS (
-    SELECT
-        tenant_id,
-        severity,
-        status,
-        opened_at,
-        closed_at
-    FROM raw.dfir_iris_cases
-)
 SELECT
     tenant_id,
     severity,
@@ -18,5 +9,5 @@ SELECT
         ORDER BY EXTRACT(EPOCH FROM (closed_at - opened_at)) / 3600.0
     ) FILTER (WHERE status = 'closed' AND closed_at IS NOT NULL)
         AS median_time_to_close_hours
-FROM case_domain_input
+FROM raw.dfir_iris_cases
 GROUP BY tenant_id, severity;

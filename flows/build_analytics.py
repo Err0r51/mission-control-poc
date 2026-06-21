@@ -13,20 +13,19 @@ ANALYTICS_SQL_DIR = Path(__file__).resolve().parents[1] / "sql" / "analytics"
 
 
 @task
-def execute_analytics_sql() -> list[str]:
+def execute_analytics_sql() -> list[Path]:
     """Run the analytics rebuild SQL directory as one database transaction."""
     with warehouse_connection() as conn:
-        executed_files = run_sql_directory(conn, ANALYTICS_SQL_DIR)
-    return [str(path) for path in executed_files]
+        return run_sql_directory(conn, ANALYTICS_SQL_DIR)
 
 
 @task
-def log_analytics_summary(executed_files: list[str]) -> None:
+def log_analytics_summary(executed_files: list[Path]) -> None:
     """Log the deterministic analytics rebuild steps."""
     logger = get_run_logger()
     logger.info(
         "Executed analytics SQL files: %s",
-        ", ".join(Path(path).name for path in executed_files),
+        ", ".join(path.name for path in executed_files),
     )
 
 

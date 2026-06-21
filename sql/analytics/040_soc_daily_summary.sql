@@ -19,15 +19,16 @@ case_closed_daily AS (
     WHERE closed_at IS NOT NULL
     GROUP BY (closed_at AT TIME ZONE 'UTC')::date, tenant_id
 ),
+-- Roll up the already-built per-category alert_metrics (010-040 run in order)
+-- so this daily total reconciles with analytics.alert_metrics by construction.
 alert_daily AS (
     SELECT
-        (event_at AT TIME ZONE 'UTC')::date AS metric_date,
+        metric_date,
         tenant_id,
-        COUNT(*)::bigint AS total_alert_count,
-        COUNT(*) FILTER (WHERE triage_status = 'escalated')::bigint
-            AS escalated_alert_count
-    FROM raw.siem_alerts
-    GROUP BY (event_at AT TIME ZONE 'UTC')::date, tenant_id
+        SUM(total_alert_count)::bigint AS total_alert_count,
+        SUM(escalated_alert_count)::bigint AS escalated_alert_count
+    FROM analytics.alert_metrics
+    GROUP BY metric_date, tenant_id
 ),
 automation_daily AS (
     SELECT

@@ -84,6 +84,22 @@ services:
       prefect-server:
         condition: service_healthy
 
+  prefect-deploy:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    command:
+      [
+        "sh",
+        "-c",
+        "prefect work-pool create soc-metrics-process --type process --overwrite --no-prompt && prefect deploy --prefect-file prefect.yaml --name soc_metrics_pipeline/manual --no-prompt",
+      ]
+    environment:
+      PREFECT_API_URL: ${PREFECT_API_URL}
+    depends_on:
+      prefect-server:
+        condition: service_healthy
+
   metabase:
     image: metabase/metabase:v0.62.2.8
     environment:

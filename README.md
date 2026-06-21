@@ -42,5 +42,12 @@ uv run python -m compileall flows src
 ```
 
 Docker Compose wiring for PostgreSQL, Prefect, the worker image, and Metabase is now part
-of the repository. SQL transforms and deployment registration are still added in later
-implementation phases.
+of the repository.
+
+Step 7 adds a real parent flow, `soc_metrics_pipeline`, and a single manual Prefect
+deployment, `soc_metrics_pipeline/manual`. Deployment registration is containerized via
+the Compose one-shot service `prefect-deploy` so the repo can keep using the in-network
+`PREFECT_API_URL` and `POSTGRES_HOST` values from `.env`.
+
+For the exact local operator workflow, including registration, inspection, and triggering
+the deployment from inside the Prefect container, see [docs/local-development.md](/Users/frederikjunge/Developer/mission-control-poc/docs/local-development.md).

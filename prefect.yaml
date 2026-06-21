@@ -1,0 +1,17 @@
+---
+name: soc-metrics-pipeline
+prefect-version: 3.7.5
+
+build: null
+push: null
+pull:
+  - prefect.deployments.steps.set_working_directory:
+      directory: /app
+
+deployments:
+  - name: manual
+    description: Parent deployment for the SOC metrics pipeline.
+    entrypoint: flows.soc_metrics_pipeline.soc_metrics_pipeline
+    parameters: {}
+    work_pool:
+      name: soc-metrics-process
