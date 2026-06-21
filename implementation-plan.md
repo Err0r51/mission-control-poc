@@ -156,8 +156,6 @@ Implementation notes:
 - Execute SQL files in deterministic filename order.
 
 Verification:
-
-- unit-level smoke checks for importing DB helper modules
 - Ruff checks
 
 ## Phase 4 - Deterministic Mock Sources

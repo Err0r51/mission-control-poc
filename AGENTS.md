@@ -31,6 +31,7 @@ Use:
 - Metabase for dashboards
 - plain SQL for transformations
 - uv for Python dependency management
+- podman instead of plain docker
 
 Do not add:
 
