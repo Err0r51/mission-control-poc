@@ -1,7 +1,7 @@
 CREATE TABLE analytics.alert_metrics AS
 WITH alert_domain_input AS (
     SELECT
-        event_at::date AS metric_date,
+        (event_at AT TIME ZONE 'UTC')::date AS metric_date,
         tenant_id,
         detection_name AS alert_category,
         severity,

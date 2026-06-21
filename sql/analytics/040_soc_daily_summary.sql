@@ -1,15 +1,15 @@
 CREATE TABLE analytics.soc_daily_summary AS
 WITH case_opened_daily AS (
     SELECT
-        opened_at::date AS metric_date,
+        (opened_at AT TIME ZONE 'UTC')::date AS metric_date,
         tenant_id,
         COUNT(*)::bigint AS opened_case_count
     FROM raw.dfir_iris_cases
-    GROUP BY opened_at::date, tenant_id
+    GROUP BY (opened_at AT TIME ZONE 'UTC')::date, tenant_id
 ),
 case_closed_daily AS (
     SELECT
-        closed_at::date AS metric_date,
+        (closed_at AT TIME ZONE 'UTC')::date AS metric_date,
         tenant_id,
         COUNT(*)::bigint AS closed_case_count,
         percentile_cont(0.5) WITHIN GROUP (
@@ -17,21 +17,21 @@ case_closed_daily AS (
         ) AS median_case_close_hours
     FROM raw.dfir_iris_cases
     WHERE closed_at IS NOT NULL
-    GROUP BY closed_at::date, tenant_id
+    GROUP BY (closed_at AT TIME ZONE 'UTC')::date, tenant_id
 ),
 alert_daily AS (
     SELECT
-        event_at::date AS metric_date,
+        (event_at AT TIME ZONE 'UTC')::date AS metric_date,
         tenant_id,
         COUNT(*)::bigint AS total_alert_count,
         COUNT(*) FILTER (WHERE triage_status = 'escalated')::bigint
             AS escalated_alert_count
     FROM raw.siem_alerts
-    GROUP BY event_at::date, tenant_id
+    GROUP BY (event_at AT TIME ZONE 'UTC')::date, tenant_id
 ),
 automation_daily AS (
     SELECT
-        started_at::date AS metric_date,
+        (started_at AT TIME ZONE 'UTC')::date AS metric_date,
         tenant_id,
         COUNT(*)::bigint AS total_automation_run_count,
         COUNT(*) FILTER (WHERE result_status = 'success')::bigint
@@ -42,7 +42,7 @@ automation_daily AS (
             ORDER BY EXTRACT(EPOCH FROM (ended_at - started_at))
         ) AS median_automation_runtime_seconds
     FROM raw.shuffle_runs
-    GROUP BY started_at::date, tenant_id
+    GROUP BY (started_at AT TIME ZONE 'UTC')::date, tenant_id
 ),
 soc_activity_keys AS (
     SELECT metric_date, tenant_id FROM case_opened_daily
