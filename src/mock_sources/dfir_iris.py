@@ -53,12 +53,15 @@ def _build_case(index: int) -> DfirIrisCase:
     status = "closed" if is_closed else "open"
     opened_at = spread_timestamp(index)
     closed_at = opened_at + timedelta(hours=4 + (index % 12) * 6) if is_closed else None
-    # Decorrelate team from tenant (index % 3) and severity (index % 4).
+    # Decorrelate each dimension off a different digit of the index so KPI
+    # breakdowns are non-degenerate (see _common docstring): severity = index % 4,
+    # team = (index // 4) % 3, analyst = (index // 12) % 4, title = (index // 3) % 4.
     team = TEAMS[(index // 4) % 3]
-    analyst = ANALYSTS[index % 4]
+    analyst = ANALYSTS[(index // 12) % 4]
+    title = CASE_TITLES[(index // 3) % 4]
     payload: dict[str, object] = {
         "case_id": index + 1,
-        "case_name": f"#{index + 1} - {CASE_TITLES[index % 4]}",
+        "case_name": f"#{index + 1} - {title}",
         "severity_id": SEVERITY_TO_IRIS_ID[severity],
         "state_id": 3 if status == "open" else 5,
         "case_customer_id": TENANT_CUSTOMER_IDS[tenant],

@@ -16,10 +16,9 @@ from ._common import (
     spread_timestamp,
     tenant_for,
 )
+from .siem import DEFAULT_ALERT_COUNT
 
 WORKFLOWS = ("enrich-ip", "auto-contain-host", "notify-analyst", "block-indicator")
-
-DEFAULT_ALERT_COUNT = 240
 
 
 @dataclass(frozen=True, slots=True)

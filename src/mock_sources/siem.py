@@ -30,6 +30,10 @@ from .dfir_iris import DEFAULT_CASE_COUNT
 TRIAGE_STATUSES = ("new", "in_progress", "escalated", "closed")
 RESOLUTIONS = ("true_positive", "false_positive", "undetermined")
 
+# This source owns the alert cardinality; downstream sources that build foreign
+# keys to alerts (e.g. shuffle runs) import this rather than redeclaring 240.
+DEFAULT_ALERT_COUNT = 240
+
 # Per-product detection labels.
 FORTISIEM_RULES = (
     "Brute force authentication failure",
@@ -104,12 +108,12 @@ class SecurityAlert:
     payload: dict[str, object]
 
 
-def _fortisiem_payload(index: int, name: str, severity: str, tenant: str) -> dict:
+def _fortisiem_payload(
+    index: int, name: str, severity: str, tenant: str, triage: str, resolution: str
+) -> dict:
     score, category = _FORTISIEM_SEVERITY[severity]
-    reso = {"true_positive": 2, "false_positive": 3, "undetermined": 4}[
-        RESOLUTIONS[(index // 9) % 3]
-    ]
-    status = 2 if TRIAGE_STATUSES[(index // 4) % 4] == "closed" else 0
+    reso = {"true_positive": 2, "false_positive": 3, "undetermined": 4}[resolution]
+    status = 2 if triage == "closed" else 0
     return {
         "incidentId": 100000 + index,
         "incidentTitle": name,
@@ -123,12 +127,12 @@ def _fortisiem_payload(index: int, name: str, severity: str, tenant: str) -> dic
     }
 
 
-def _fortiedr_payload(index: int, name: str, severity: str) -> dict:
+def _fortiedr_payload(index: int, name: str, severity: str, resolution: str) -> dict:
     classification = {
         "true_positive": "Malicious",
         "false_positive": "Safe",
         "undetermined": "PUP",
-    }[RESOLUTIONS[(index // 9) % 3]]
+    }[resolution]
     return {
         "eventId": 400000 + index,
         "rawDataId": 1270000000 + index,
@@ -140,17 +144,18 @@ def _fortiedr_payload(index: int, name: str, severity: str) -> dict:
     }
 
 
-def _sentinelone_payload(index: int, name: str, severity: str) -> dict:
-    mitigation = (
-        "mitigated" if TRIAGE_STATUSES[(index // 4) % 4] == "closed" else "active"
-    )
+def _sentinelone_payload(
+    index: int, name: str, severity: str, triage: str, resolution: str
+) -> dict:
+    mitigation = "mitigated" if triage == "closed" else "active"
     return {
         "threatInfo": {
             "threatName": name,
-            "classification": ("Malware", "Ransomware", "PUA")[index % 3],
+            # Decorrelate classification from tenant (index % 3) via a higher digit.
+            "classification": ("Malware", "Ransomware", "PUA")[(index // 27) % 3],
             "confidenceLevel": _S1_CONFIDENCE[severity],
             "mitigationStatus": mitigation,
-            "analystVerdict": _S1_VERDICT[RESOLUTIONS[(index // 9) % 3]],
+            "analystVerdict": _S1_VERDICT[resolution],
             "detectionType": "static" if index % 2 == 0 else "dynamic",
         },
         "agentRealtimeInfo": {"agentComputerName": f"host-{index % 20}"},
@@ -171,13 +176,15 @@ def _build_alert(index: int) -> SecurityAlert:
 
     if product == "FortiSIEM":
         name = FORTISIEM_RULES[index % 5]
-        payload: dict[str, object] = _fortisiem_payload(index, name, severity, tenant)
+        payload: dict[str, object] = _fortisiem_payload(
+            index, name, severity, tenant, triage, resolution
+        )
     elif product == "FortiEDR":
         name = FORTIEDR_PROCESSES[index % 5]
-        payload = _fortiedr_payload(index, name, severity)
+        payload = _fortiedr_payload(index, name, severity, resolution)
     else:
         name = SENTINELONE_THREATS[index % 5]
-        payload = _sentinelone_payload(index, name, severity)
+        payload = _sentinelone_payload(index, name, severity, triage, resolution)
 
     return SecurityAlert(
         source_alert_id=alert_id(index),
@@ -193,6 +200,6 @@ def _build_alert(index: int) -> SecurityAlert:
     )
 
 
-def generate_security_alerts(count: int = 240) -> list[SecurityAlert]:
+def generate_security_alerts(count: int = DEFAULT_ALERT_COUNT) -> list[SecurityAlert]:
     """Return *count* deterministic security alerts across the three products."""
     return [_build_alert(i) for i in range(count)]
