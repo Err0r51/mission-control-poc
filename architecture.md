@@ -152,6 +152,38 @@ The Prefect worker executes the pipeline code.
 
 The server does not execute pipeline code.
 
+## Prefect runtime contract
+
+The local Prefect runtime uses one process work pool.
+
+Required runtime shape:
+
+- work pool type: `process`
+- worker service: `prefect-worker`
+- worker command: `prefect worker start --pool soc-metrics-process --type process`
+- deployed flow: `soc_metrics_pipeline`
+- child flows: `ingest_raw` and `build_analytics` are imported and called by the parent flow, not deployed separately
+- flow code source: baked into the project-specific worker image
+- SQL file source: baked into the project-specific worker image
+- Prefect API URL: provided to the worker through `PREFECT_API_URL`
+- schedule policy: manual by default until a schedule is explicitly needed
+
+Startup order:
+
+1. `postgres` becomes healthy.
+2. `prefect-server` starts and connects to the `prefect` database.
+3. `prefect-worker` starts after the Prefect API is reachable.
+4. the parent deployment is registered against the process work pool.
+5. flow runs are scheduled by the server and executed by the worker process.
+
+The Prefect server must use only the `prefect` logical database.
+
+The Prefect worker must connect to `warehouse` for pipeline reads and writes.
+
+The Prefect worker must not connect to `metabase` for pipeline data.
+
+The deployment registration mechanism may be a Compose one-shot service or an explicit documented command, but it must register only `soc_metrics_pipeline`.
+
 ## Flow structure
 
 The code is organized as two logical flows:

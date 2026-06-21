@@ -329,11 +329,32 @@ Deployment behavior:
 - keep `ingest_raw` and `build_analytics` as code boundaries, not separate deployments
 - run through a Prefect process worker inside Docker
 
+Runtime contract:
+
+- create one process work pool named `soc-metrics-process`
+- start the worker with `prefect worker start --pool soc-metrics-process --type process`
+- set `PREFECT_API_URL` in the worker container so it targets the Prefect server API
+- bake flow code and SQL files into the project-specific worker image
+- register only `soc_metrics_pipeline` as a deployment
+- import and call `ingest_raw` and `build_analytics` from the parent flow
+- keep the default run policy manual until a schedule is explicitly required
+- ensure the Prefect server uses only the `prefect` logical database
+- ensure the worker uses `warehouse` for pipeline data and never writes pipeline data to `prefect` or `metabase`
+
+Startup sequencing:
+
+1. wait for `postgres` health before starting Prefect services
+2. start `prefect-server` against the `prefect` database
+3. create the `soc-metrics-process` work pool if it does not exist
+4. register the `soc_metrics_pipeline` deployment against that work pool
+5. start `prefect-worker` after the Prefect API is reachable
+
 Implementation notes:
 
 - Keep the Prefect server as orchestration and observability only.
 - The server should not execute pipeline code.
 - The worker image should contain both Python code and SQL files.
+- Prefer a Compose one-shot service or documented explicit command for deployment registration.
 
 Verification:
 
