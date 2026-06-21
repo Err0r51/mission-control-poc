@@ -152,6 +152,10 @@ Keep secrets in `.env`.
 
 Document configuration in `.env.example`.
 
+Postgres bootstrap scripts in `docker/postgres/init/` only run on first cluster initialization.
+
+When changing logical databases, roles, or database credentials, provide an explicit migration path for existing `postgres-data` volumes or document that a clean reset such as `podman compose down -v` is required.
+
 Do not modify unrelated files.
 
 Do not rewrite architecture constraints unless explicitly asked.

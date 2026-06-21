@@ -18,6 +18,21 @@ uv sync
 The repository uses `src/` as a Python source root. Runtime imports stay `db` and
 `mock_sources`; there is no `src.*` package namespace.
 
+## Bootstrap Caveat
+
+The Postgres bootstrap scripts under `docker/postgres/init/` run only when the
+`postgres-data` volume is initialized for the first time. If you change logical
+database roles, role passwords, or connection wiring, existing local volumes do
+not automatically pick that up.
+
+For changes in that category, either ship an explicit migration path for an
+already-initialized cluster or reinitialize the local database with:
+
+```bash
+podman compose down -v
+podman compose up -d
+```
+
 ## Verification
 
 ```bash
