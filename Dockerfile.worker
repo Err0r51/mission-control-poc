@@ -1,0 +1,14 @@
+FROM ghcr.io/astral-sh/uv:0.11.23-python3.12-trixie
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock README.md ./
+COPY flows ./flows
+COPY src ./src
+COPY sql ./sql
+
+RUN uv sync --locked --no-dev
+
+ENV PATH="/app/.venv/bin:${PATH}"
+
+CMD ["prefect", "worker", "start", "--pool", "soc-metrics-process", "--type", "process", "--with-healthcheck", "--install-policy", "never"]

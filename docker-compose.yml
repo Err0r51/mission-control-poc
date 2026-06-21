@@ -1,0 +1,99 @@
+services:
+  postgres:
+    image: postgres:17.10-bookworm
+    environment:
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
+      POSTGRES_DB: postgres
+      PREFECT_DB_NAME: ${PREFECT_DB_NAME}
+      METABASE_DB_NAME: ${METABASE_DB_NAME}
+      WAREHOUSE_DB_NAME: ${WAREHOUSE_DB_NAME}
+      WAREHOUSE_DB_USER: ${WAREHOUSE_DB_USER}
+      WAREHOUSE_DB_PASSWORD: ${WAREHOUSE_DB_PASSWORD}
+      METABASE_WAREHOUSE_USER: ${METABASE_WAREHOUSE_USER}
+      METABASE_WAREHOUSE_PASSWORD: ${METABASE_WAREHOUSE_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  prefect-server:
+    image: prefecthq/prefect:3.7.5-python3.12
+    command: ["prefect", "server", "start", "--host", "0.0.0.0", "--port", "4200"]
+    environment:
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://${POSTGRES_ADMIN_USER}:${POSTGRES_ADMIN_PASSWORD}@postgres:5432/${PREFECT_DB_NAME}
+      PREFECT_UI_API_URL: http://localhost:4200/api
+      PREFECT_UI_URL: http://localhost:4200
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+      PREFECT_SERVER_API_PORT: 4200
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "4200:4200"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:4200/api/health').read()\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  prefect-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    command:
+      [
+        "prefect",
+        "worker",
+        "start",
+        "--pool",
+        "${PREFECT_WORK_POOL}",
+        "--type",
+        "process",
+        "--with-healthcheck",
+        "--install-policy",
+        "never",
+      ]
+    environment:
+      PREFECT_API_URL: ${PREFECT_API_URL}
+      PREFECT_WORK_POOL: ${PREFECT_WORK_POOL}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      WAREHOUSE_DB_NAME: ${WAREHOUSE_DB_NAME}
+      WAREHOUSE_DB_USER: ${WAREHOUSE_DB_USER}
+      WAREHOUSE_DB_PASSWORD: ${WAREHOUSE_DB_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      prefect-server:
+        condition: service_healthy
+
+  metabase:
+    image: metabase/metabase:v0.62.2.8
+    environment:
+      MB_DB_TYPE: ${MB_DB_TYPE}
+      MB_DB_HOST: ${MB_DB_HOST}
+      MB_DB_PORT: ${MB_DB_PORT}
+      MB_DB_DBNAME: ${MB_DB_DBNAME}
+      MB_DB_USER: ${MB_DB_USER}
+      MB_DB_PASS: ${MB_DB_PASS}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${METABASE_PORT}:3000"
+
+volumes:
+  postgres-data:
