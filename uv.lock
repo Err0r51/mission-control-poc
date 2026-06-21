@@ -1332,7 +1332,7 @@ source = { editable = "." }
 dependencies = [
     { name = "prefect" },
     { name = "psycopg", extra = ["binary"] },
-    { name = "python-dotenv" },
+    { name = "pydantic-settings" },
 ]
 
 [package.dev-dependencies]
@@ -1344,7 +1344,7 @@ dev = [
 requires-dist = [
     { name = "prefect" },
     { name = "psycopg", extras = ["binary"] },
-    { name = "python-dotenv" },
+    { name = "pydantic-settings", specifier = ">=2.14.2" },
 ]
 
 [package.metadata.requires-dev]
