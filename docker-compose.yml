@@ -118,5 +118,25 @@ services:
     ports:
       - "${METABASE_PORT}:3000"
 
+  metabase-bootstrap:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    command: ["python", "src/metabase_bootstrap.py"]
+    environment:
+      METABASE_ADMIN_EMAIL: ${METABASE_ADMIN_EMAIL:-}
+      METABASE_ADMIN_PASSWORD: ${METABASE_ADMIN_PASSWORD:-}
+      METABASE_ADMIN_FIRST_NAME: ${METABASE_ADMIN_FIRST_NAME:-}
+      METABASE_ADMIN_LAST_NAME: ${METABASE_ADMIN_LAST_NAME:-}
+      METABASE_SITE_NAME: ${METABASE_SITE_NAME:-SOC Metrics Pipeline}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      WAREHOUSE_DB_NAME: ${WAREHOUSE_DB_NAME}
+      METABASE_WAREHOUSE_USER: ${METABASE_WAREHOUSE_USER}
+      METABASE_WAREHOUSE_PASSWORD: ${METABASE_WAREHOUSE_PASSWORD}
+    depends_on:
+      metabase:
+        condition: service_started
+
 volumes:
   postgres-data:
