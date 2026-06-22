@@ -59,8 +59,12 @@ The warehouse connection is always created against:
 - If Metabase is already initialized, it logs in with the configured admin credentials.
 - If those credentials do not match the existing Metabase admin state, the bootstrap exits
   with a clear error instead of mutating unknown application state.
-- If the warehouse database entry already exists, the bootstrap updates it in place instead
-  of creating a duplicate.
+- If the warehouse database entry already exists and already points at the intended
+  warehouse target, the bootstrap updates it in place instead of creating a duplicate.
+- If a database named `SOC Metrics Warehouse` already exists but points somewhere else, the
+  bootstrap fails clearly instead of overwriting it.
+- On the first run, the bootstrap waits for Metabase admin login to become usable after
+  setup instead of relying on a fixed sleep.
 
 ## What the bootstrap configures
 

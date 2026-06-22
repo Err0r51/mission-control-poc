@@ -12,6 +12,9 @@ from urllib import error, request
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+POST_SETUP_LOGIN_TIMEOUT_SECONDS = 60
+POST_SETUP_LOGIN_RETRY_INTERVAL_SECONDS = 2
+
 
 class BootstrapSettings(BaseSettings):
     """Configuration for Metabase first-run setup and warehouse registration."""
@@ -49,6 +52,14 @@ class BootstrapSettings(BaseSettings):
 @dataclass(frozen=True)
 class ExistingDatabaseMatch:
     """A single existing Metabase database record that should be updated."""
+
+    database_id: int
+    name: str
+
+
+@dataclass(frozen=True)
+class ExistingDatabaseConflict:
+    """An existing Metabase database entry that blocks safe bootstrap updates."""
 
     database_id: int
     name: str
@@ -207,42 +218,101 @@ def connection_payload(settings: BootstrapSettings) -> dict[str, Any]:
     }
 
 
+def database_target_details(database: dict[str, Any]) -> dict[str, str]:
+    """Normalize the target fields used to identify the warehouse connection."""
+
+    details = database.get("details") or {}
+    if not isinstance(details, dict):
+        details = {}
+    return {
+        "engine": str(database.get("engine") or ""),
+        "host": str(details.get("host") or ""),
+        "port": str(details.get("port") or ""),
+        "dbname": str(details.get("dbname") or ""),
+        "user": str(details.get("user") or ""),
+    }
+
+
+def target_identity(target: dict[str, Any]) -> dict[str, str]:
+    """Return the normalized connection identity from the desired payload."""
+
+    details = target["details"]
+    return {
+        "engine": str(target["engine"]),
+        "host": str(details["host"]),
+        "port": str(details["port"]),
+        "dbname": str(details["dbname"]),
+        "user": str(details["user"]),
+    }
+
+
 def matching_database(
     databases: list[dict[str, Any]], target: dict[str, Any]
 ) -> ExistingDatabaseMatch | None:
-    """Find the existing warehouse connection that should be updated."""
+    """Find the existing warehouse connection that can be safely updated."""
 
+    target_details = target_identity(target)
     matches: dict[int, ExistingDatabaseMatch] = {}
+    name_conflicts: dict[int, ExistingDatabaseConflict] = {}
     for database in databases:
         database_id = database.get("id")
         if not isinstance(database_id, int):
             continue
 
-        details = database.get("details") or {}
-        if not isinstance(details, dict):
-            details = {}
-
         same_name = database.get("name") == target["name"]
-        same_target = (
-            database.get("engine") == target["engine"]
-            and details.get("host") == target["details"]["host"]
-            and str(details.get("port")) == str(target["details"]["port"])
-            and details.get("dbname") == target["details"]["dbname"]
-            and details.get("user") == target["details"]["user"]
-        )
-        if same_name or same_target:
+        same_target = database_target_details(database) == target_details
+        if same_target:
             matches[database_id] = ExistingDatabaseMatch(
                 database_id=database_id,
                 name=str(database.get("name") or database_id),
             )
+        elif same_name:
+            name_conflicts[database_id] = ExistingDatabaseConflict(
+                database_id=database_id,
+                name=str(database.get("name") or database_id),
+            )
+
+    if name_conflicts:
+        conflicting_ids = ", ".join(
+            str(conflict.database_id) for conflict in name_conflicts.values()
+        )
+        raise RuntimeError(
+            "Found an existing Metabase database named "
+            f"'{target['name']}' that points at a different target "
+            f"(id={conflicting_ids}). Refusing to overwrite it."
+        )
 
     if len(matches) > 1:
         raise RuntimeError(
-            "Found multiple existing Metabase database entries that match the "
-            "warehouse connection. Clean up duplicates in Metabase before rerunning "
-            "the bootstrap."
+            "Found multiple existing Metabase database entries that already point "
+            "at the target warehouse connection. Clean up duplicates in Metabase "
+            "before rerunning the bootstrap."
         )
     return next(iter(matches.values()), None)
+
+
+def login_with_retry(
+    client: MetabaseClient,
+    settings: BootstrapSettings,
+    *,
+    timeout_seconds: int = POST_SETUP_LOGIN_TIMEOUT_SECONDS,
+    retry_interval_seconds: int = POST_SETUP_LOGIN_RETRY_INTERVAL_SECONDS,
+) -> None:
+    """Retry admin login until Metabase is ready for authenticated use."""
+
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            login(client, settings, fail_on_mismatch=False)
+            return
+        except RuntimeError as exc:
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    "Metabase setup completed, but the admin login did not become "
+                    f"ready within {timeout_seconds}s."
+                ) from exc
+            print(f"Waiting for Metabase admin login: {exc}")
+            time.sleep(retry_interval_seconds)
 
 
 def upsert_database(client: MetabaseClient, settings: BootstrapSettings) -> int:
@@ -297,9 +367,10 @@ def main() -> int:
 
     if not has_user_setup:
         create_initial_admin(client, settings, properties)
-        time.sleep(2)
+        login_with_retry(client, settings)
+    else:
+        login(client, settings, fail_on_mismatch=True)
 
-    login(client, settings, fail_on_mismatch=has_user_setup)
     database_id = upsert_database(client, settings)
     print(f"Metabase warehouse connection is ready (id={database_id}).")
     return 0
