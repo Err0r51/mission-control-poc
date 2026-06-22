@@ -15,16 +15,19 @@ resolution = (i//9)%3 -- independent of one another.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ._common import (
+    ANALYSTS,
     PRODUCTS,
     SEVERITIES,
     alert_id,
     case_id,
     spread_timestamp,
+    system_id,
     tenant_for,
 )
+from .customer_systems import DEFAULT_CUSTOMER_SYSTEM_COUNT
 from .dfir_iris import DEFAULT_CASE_COUNT
 
 TRIAGE_STATUSES = ("new", "in_progress", "escalated", "closed")
@@ -99,12 +102,15 @@ class SecurityAlert:
     source_alert_id: str
     tenant_id: str
     source_product: str
+    system_id: str
     detection_name: str
     severity: str
     event_at: datetime
     triage_status: str
     resolution: str
     linked_case_id: str | None
+    reviewed_at: datetime | None
+    reviewed_by_analyst: str | None
     payload: dict[str, object]
 
 
@@ -162,16 +168,36 @@ def _sentinelone_payload(
     }
 
 
-def _build_alert(index: int) -> SecurityAlert:
+def _build_alert(
+    index: int,
+    alert_count: int,
+    case_count: int,
+    customer_system_count: int,
+) -> SecurityAlert:
     """Build one deterministic alert from *index* (mixed-radix dimensions)."""
     tenant = tenant_for(index)
     product = PRODUCTS[(index // 3) % 3]
     severity = SEVERITIES[index % 4]
     triage = TRIAGE_STATUSES[(index // 4) % 4]
-    resolution = RESOLUTIONS[(index // 9) % 3]
-    event_at = spread_timestamp(index)
-    linked_case_id = (
-        case_id(index % DEFAULT_CASE_COUNT) if triage == "escalated" else None
+    event_at = spread_timestamp(index, alert_count)
+    resolution = (
+        "undetermined" if triage == "new" else RESOLUTIONS[(index // 9) % 3]
+    )
+    linked_case_id = case_id(index % case_count) if case_count > 0 else None
+    reviewed_at = (
+        event_at + timedelta(minutes=20 + (index % 6) * 35)
+        if triage != "new"
+        else None
+    )
+    reviewed_by_analyst = (
+        ANALYSTS[(index // 12) % 4]
+        if reviewed_at is not None
+        else None
+    )
+    monitored_system_id = (
+        system_id(index % customer_system_count)
+        if customer_system_count > 0
+        else system_id(index)
     )
 
     if product == "FortiSIEM":
@@ -186,20 +212,37 @@ def _build_alert(index: int) -> SecurityAlert:
         name = SENTINELONE_THREATS[index % 5]
         payload = _sentinelone_payload(index, name, severity, triage, resolution)
 
+    payload["system_id"] = monitored_system_id
+    payload["reviewed_at"] = (
+        reviewed_at.isoformat() if reviewed_at is not None else None
+    )
+    payload["reviewed_by"] = reviewed_by_analyst
+    payload["linked_case_id"] = linked_case_id
+
     return SecurityAlert(
         source_alert_id=alert_id(index),
         tenant_id=tenant,
         source_product=product,
+        system_id=monitored_system_id,
         detection_name=name,
         severity=severity,
         event_at=event_at,
         triage_status=triage,
         resolution=resolution,
         linked_case_id=linked_case_id,
+        reviewed_at=reviewed_at,
+        reviewed_by_analyst=reviewed_by_analyst,
         payload=payload,
     )
 
 
-def generate_security_alerts(count: int = DEFAULT_ALERT_COUNT) -> list[SecurityAlert]:
+def generate_security_alerts(
+    count: int = DEFAULT_ALERT_COUNT,
+    case_count: int = DEFAULT_CASE_COUNT,
+    customer_system_count: int = DEFAULT_CUSTOMER_SYSTEM_COUNT,
+) -> list[SecurityAlert]:
     """Return *count* deterministic security alerts across the three products."""
-    return [_build_alert(i) for i in range(count)]
+    return [
+        _build_alert(i, count, case_count, customer_system_count)
+        for i in range(count)
+    ]

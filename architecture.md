@@ -98,7 +98,7 @@ The warehouse uses a two-layer model.
 
 ### `raw`
 
-The `raw` schema stores mocked source-shaped extracts.
+The `raw` schema stores mocked source-shaped extracts and monitored-system inventory.
 
 Raw should be minimal and source-shaped. It should not model the final SOC domain too early.
 
@@ -108,6 +108,7 @@ Typical raw records may include:
 - tenant identifier
 - source record identifier, where useful
 - source timestamp, where useful
+- explicit KPI-driving fields where the prototype contract needs them
 - extraction timestamp
 - JSON payload or simple source-shaped columns
 
@@ -115,13 +116,25 @@ The raw shape may evolve because the real source payloads are not yet known.
 
 ### `analytics`
 
-The `analytics` schema stores BI-facing transformed outputs.
+The `analytics` schema stores BI-facing transformed outputs for the current KPI prototype.
 
 Analytics objects are rebuilt from `raw`.
 
 Metabase reads from `analytics`.
 
-Analytics should support the proof-of-concept dashboards without locking the project into a final fact and dimension model.
+Analytics now contains lower-grain, BI-safe fact tables plus KPI rollups:
+
+- incident facts
+- alert facts
+- automation-run facts
+- monitored-system facts
+- monthly KPI rollups
+- alert-volume rollups by source
+- alert-review rollups by shift
+
+This is still a prototype contract. The goal is to make KPI-relevant detail queryable from
+`analytics` so Metabase does not need `raw`, without claiming this is the final production
+warehouse model.
 
 ## Data flow
 
@@ -130,6 +143,7 @@ The pipeline follows this path:
 - mocked DFIR-IRIS-like data to `warehouse.raw`
 - mocked SIEM-like data to `warehouse.raw`
 - mocked Shuffle-like data to `warehouse.raw`
+- mocked monitored-system inventory to `warehouse.raw`
 - SQL transforms from `warehouse.raw` to `warehouse.analytics`
 - Metabase dashboards from `warehouse.analytics`
 
@@ -211,6 +225,7 @@ The `ingest_raw` flow is responsible for:
 - generating mocked DFIR-IRIS-like records
 - generating mocked SIEM-like records
 - generating mocked Shuffle-like records
+- generating mocked monitored-system inventory
 - loading those records into `warehouse.raw`
 - logging record counts through Prefect
 
@@ -253,9 +268,10 @@ The transformation path is:
 Transformations should remain simple:
 
 - read from `raw`
-- write or replace objects in `analytics`
+- write or replace facts and rollups in `analytics`
 - keep analytics rebuildable
-- avoid premature final modeling
+- keep `raw` private to pipeline operators
+- avoid premature final production modeling
 
 dbt is not used.
 
@@ -309,6 +325,19 @@ Metabase owns:
 - Use UTC timestamps.
 - Use real timestamp types instead of string timestamps.
 - Use medians or percentiles for time-based SOC metrics where applicable.
+### Relevant KPIs
+  - `true positive incidents`
+  - `false positives`
+  - `false positive rate`
+  - `true positive rate`
+  - `incident escalation rate`
+  - `MTTD`
+  - `MTTR`
+  - `customer systems under monitoring`
+  - `alerts reviewed per analyst per shift`
+  - `automatically closed incidents`
+  - `total alert volume`
+  - `alert volume by source`
 
 ## Security and configuration principles
 

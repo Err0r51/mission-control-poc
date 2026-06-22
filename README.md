@@ -2,13 +2,39 @@
 
 A local proof of concept for an SOC metrics pipeline. A single Docker Compose stack
 ingests deterministic mocked DFIR-IRIS-like, SIEM-like, and Shuffle-like source data into
-`warehouse.raw`, rebuilds dashboard-ready tables in `warehouse.analytics` with plain SQL,
-and serves them to Metabase.
+`warehouse.raw`, rebuilds BI-safe fact tables plus prototype KPI rollups in
+`warehouse.analytics` with plain SQL, and serves them to Metabase.
 
 The stack runs one PostgreSQL instance hosting three logical databases — `prefect`,
 `metabase`, and `warehouse` — a Prefect server, a Prefect process worker that runs the
 pipeline, and Metabase as the BI layer. A single parent flow, `soc_metrics_pipeline`,
 orchestrates ingestion and analytics in order.
+
+## How it works
+
+```text
+                  ┌──────────────────────── Prefect ────────────────────────┐
+                  │  soc_metrics_pipeline   (parent flow · manual run)       │
+                  │     ① ingest_raw   ───────────▶   ② build_analytics      │
+                  └────────┬────────────────────────────────┬───────────────┘
+                  generate │ + load                  rebuild │ with plain SQL
+  src/mock_sources/        ▼                                 ▼
+  ┌───────────────┐  ┌──────────────────┐         ┌──────────────────────┐
+  │ dfir_iris     │  │  warehouse.raw   │         │ warehouse.analytics  │
+  │ siem          │─▶│  dfir_iris_cases │────────▶│  fact_incidents      │      read-only
+  │ shuffle       │  │  siem_alerts     │         │  fact_alerts         │   (metabase_reader)
+  │ customer_sys  │  │  shuffle_runs    │         │  fact_automation_runs│──────────────────▶ Metabase
+  └───────────────┘  │  customer_systems│         │  kpi_monthly + …     │
+   deterministic     └──────────────────┘         └──────────────────────┘
+   mock data         └────── one PostgreSQL: prefect │ metabase │ warehouse ──────┘
+```
+
+1. **Ingest** — `ingest_raw` generates deterministic mock data and truncate-loads it into
+   `warehouse.raw` (source-shaped tables).
+2. **Transform** — `build_analytics` rebuilds `warehouse.analytics` from `raw` with plain
+   SQL: BI-safe fact tables plus prototype KPI rollups.
+3. **Serve** — Metabase reads `warehouse.analytics` through the read-only `metabase_reader`
+   role (no access to `raw`, no write access).
 
 ## Prerequisites
 
@@ -62,6 +88,9 @@ The repository uses `src/` as a Python source root. Runtime imports stay `db` an
   `psql` verification.
 - [docs/metabase-setup.md](docs/metabase-setup.md) — Metabase admin bootstrap, warehouse
   connection, and dashboard path.
+- [docs/metabase-dashboard-playbook.md](docs/metabase-dashboard-playbook.md) — KPI
+  contract, canonical analytics tables, and the exact Metabase query-builder mapping for
+  the dashboard.
 
 ## Bootstrap Caveat
 
@@ -89,6 +118,10 @@ This is a deliberately minimal POC. The following are intentionally not included
   not separate deployments.
 - **No Redis, dbt, staging, or metadata schemas** — `warehouse` holds only the `raw` and
   `analytics` schemas for pipeline data; analytics is rebuilt with plain SQL.
+- **Prototype KPI contract, not a final warehouse model** — `analytics` intentionally
+  exposes KPI-relevant incident, alert, automation, and system detail so Metabase can stay
+  read-only against `analytics`, but the model may still change as real sources become
+  known.
 - **Manual Metabase dashboards** — the bootstrap registers the read-only warehouse
   connection; dashboards and saved questions are created by hand.
 - **First-run-only DB init** — see the Bootstrap Caveat above.

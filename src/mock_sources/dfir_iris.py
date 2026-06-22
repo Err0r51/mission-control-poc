@@ -1,9 +1,4 @@
-"""Deterministic mock generator for DFIR-IRIS-like investigation cases.
-
-Records are source-shaped but KPI-lean: the columns drive the overview
-dashboard (case volume, open vs closed, severity mix, median time-to-close),
-while ``payload`` carries a light DFIR-IRIS REST API v2 shape for realism.
-"""
+"""Deterministic mock generator for DFIR-IRIS-like investigation cases."""
 
 from __future__ import annotations
 
@@ -11,10 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from ._common import (
+    ANALYSTS,
     SEVERITIES,
     SEVERITY_TO_IRIS_ID,
     TENANT_CUSTOMER_IDS,
     case_id,
+    run_id,
     spread_timestamp,
     tenant_for,
 )
@@ -26,7 +23,7 @@ CASE_TITLES = (
     "Phishing report",
 )
 TEAMS = ("triage", "incident-response", "threat-hunting")
-ANALYSTS = ("alice", "bob", "carol", "dave")
+CASE_OUTCOMES = ("true_positive", "false_positive", "undetermined")
 
 DEFAULT_CASE_COUNT = 60
 
@@ -39,26 +36,46 @@ class DfirIrisCase:
     tenant_id: str
     severity: str
     status: str
+    occurred_at: datetime
     opened_at: datetime
     closed_at: datetime | None
+    case_outcome: str | None
     assigned_team: str
+    assigned_analyst: str
+    closed_by: str | None
+    auto_closed_by_run_id: str | None
     payload: dict[str, object]
 
 
-def _build_case(index: int) -> DfirIrisCase:
+def _build_case(index: int, case_count: int, shuffle_run_count: int) -> DfirIrisCase:
     """Build one deterministic case from *index* (mixed-radix dimensions)."""
     tenant = tenant_for(index)
     severity = SEVERITIES[index % 4]
     is_closed = index % 10 < 7
     status = "closed" if is_closed else "open"
-    opened_at = spread_timestamp(index)
-    closed_at = opened_at + timedelta(hours=4 + (index % 12) * 6) if is_closed else None
-    # Decorrelate each dimension off a different digit of the index so KPI
-    # breakdowns are non-degenerate (see _common docstring): severity = index % 4,
-    # team = (index // 4) % 3, analyst = (index // 12) % 4, title = (index // 3) % 4.
+    first_alert_at = spread_timestamp(index, case_count)
+    occurred_at = first_alert_at - timedelta(hours=2 + (index % 6) * 2)
+    opened_at = first_alert_at + timedelta(minutes=30 + (index % 5) * 20)
     team = TEAMS[(index // 4) % 3]
     analyst = ANALYSTS[(index // 12) % 4]
     title = CASE_TITLES[(index // 3) % 4]
+    auto_closed = (
+        is_closed
+        and index < shuffle_run_count
+        and index % 20 == 3
+    )
+    case_outcome = None
+    if is_closed:
+        case_outcome = (
+            "true_positive" if auto_closed else CASE_OUTCOMES[(index // 4) % 3]
+        )
+    closed_at = (
+        opened_at + timedelta(hours=4 + (index % 12) * 6)
+        if is_closed
+        else None
+    )
+    closed_by = None if not is_closed else ("shuffle-bot" if auto_closed else analyst)
+    auto_closed_by_run_id = run_id(index) if auto_closed else None
     payload: dict[str, object] = {
         "case_id": index + 1,
         "case_name": f"#{index + 1} - {title}",
@@ -67,19 +84,31 @@ def _build_case(index: int) -> DfirIrisCase:
         "case_customer_id": TENANT_CUSTOMER_IDS[tenant],
         "owner": analyst,
         "classification_id": (index % 5) + 1,
+        "occurred_at": occurred_at.isoformat(),
+        "case_outcome": case_outcome,
+        "closed_by": closed_by,
+        "auto_closed_by_run_id": auto_closed_by_run_id,
     }
     return DfirIrisCase(
         source_case_id=case_id(index),
         tenant_id=tenant,
         severity=severity,
         status=status,
+        occurred_at=occurred_at,
         opened_at=opened_at,
         closed_at=closed_at,
+        case_outcome=case_outcome,
         assigned_team=team,
+        assigned_analyst=analyst,
+        closed_by=closed_by,
+        auto_closed_by_run_id=auto_closed_by_run_id,
         payload=payload,
     )
 
 
-def generate_dfir_iris_cases(count: int = DEFAULT_CASE_COUNT) -> list[DfirIrisCase]:
+def generate_dfir_iris_cases(
+    count: int = DEFAULT_CASE_COUNT,
+    shuffle_run_count: int = 120,
+) -> list[DfirIrisCase]:
     """Return *count* deterministic DFIR-IRIS-like cases in stable order."""
-    return [_build_case(i) for i in range(count)]
+    return [_build_case(i, count, shuffle_run_count) for i in range(count)]

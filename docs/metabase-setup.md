@@ -49,7 +49,10 @@ The warehouse connection is always created against:
    ```
 
 5. Open Metabase at `http://localhost:3000` or your overridden `METABASE_PORT`, sign in
-   with the configured admin user, and create dashboards or saved questions manually.
+   with the configured admin user, and create dashboards or saved questions manually
+   against the fact-table and KPI-rollup surface in `warehouse.analytics`. Use
+   [metabase-dashboard-playbook.md](metabase-dashboard-playbook.md) as the build contract
+   for table selection, metadata setup, filters, and chart shapes.
 
 ## Rerun behavior
 
@@ -77,5 +80,8 @@ with:
 - database `warehouse`
 - username `metabase_reader`
 - schema inclusion filter restricted to `analytics`
+
+That keeps Metabase on the BI-safe prototype contract only: incident, alert, automation,
+and monitored-system facts plus the monthly and shift KPI rollups in `analytics`.
 
 Dashboards, saved questions, collections, and semantic-model tuning remain manual.

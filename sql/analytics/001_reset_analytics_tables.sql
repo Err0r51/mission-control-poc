@@ -1,7 +1,11 @@
--- The analytics schema itself is provisioned by the Postgres init script
--- (docker/postgres/init/00-init-databases.sh). This file owns only table
--- lifecycle: it resets the analytics tables before the rebuild steps recreate
--- them (010-040).
+DROP TABLE IF EXISTS analytics.alert_reviews_by_shift;
+DROP TABLE IF EXISTS analytics.alert_volume_by_source_monthly;
+DROP TABLE IF EXISTS analytics.kpi_monthly;
+DROP TABLE IF EXISTS analytics.fact_customer_systems;
+DROP TABLE IF EXISTS analytics.fact_automation_runs;
+DROP TABLE IF EXISTS analytics.fact_alerts;
+DROP TABLE IF EXISTS analytics.fact_incidents;
+
 DROP TABLE IF EXISTS analytics.soc_daily_summary;
 DROP TABLE IF EXISTS analytics.automation_metrics;
 DROP TABLE IF EXISTS analytics.alert_metrics;

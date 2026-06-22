@@ -25,12 +25,15 @@ Build the local SOC metrics pipeline described in `architecture.md` with a minim
 
 ## Current Repository State
 
-The repository currently contains only:
+The repository already contains the end-to-end local stack and a first-pass raw and
+analytics pipeline.
 
-- `AGENTS.md`
-- `architecture.md`
+The current implementation focus is expanding that prototype KPI contract:
 
-This means the first implementation step is scaffolding the expected project layout before adding pipeline behavior.
+- extend the deterministic mock sources and raw tables with explicit KPI-driving fields
+- add monitored-system inventory to `warehouse.raw`
+- replace the coarse aggregate analytics tables with fact tables plus KPI rollups
+- keep Metabase on `warehouse.analytics` only
 
 ## Target Repository Layout
 
@@ -57,6 +60,7 @@ Create the expected layout:
 |   |   `-- sql.py
 |   `-- mock_sources/
 |       |-- __init__.py
+|       |-- customer_systems.py
 |       |-- dfir_iris.py
 |       |-- shuffle.py
 |       `-- siem.py
@@ -68,7 +72,10 @@ Create the expected layout:
 |       |-- 010_case_metrics.sql
 |       |-- 020_alert_metrics.sql
 |       |-- 030_automation_metrics.sql
-|       `-- 040_soc_daily_summary.sql
+|       |-- 040_soc_daily_summary.sql
+|       |-- 050_kpi_monthly.sql
+|       |-- 060_alert_volume_by_source_monthly.sql
+|       `-- 070_alert_reviews_by_shift.sql
 `-- docs/
     |-- local-development.md
     `-- metabase-setup.md
@@ -165,6 +172,7 @@ Implement source-shaped mock data generators.
 
 Deliverables:
 
+- `src/mock_sources/customer_systems.py`
 - `src/mock_sources/dfir_iris.py`
 - `src/mock_sources/siem.py`
 - `src/mock_sources/shuffle.py`
@@ -185,18 +193,24 @@ Example source shapes:
   - tenant ID
   - severity
   - status
+  - occurred timestamp
   - opened timestamp
   - closed timestamp where applicable
-  - assigned team or analyst label
+  - explicit case outcome
+  - assigned team and analyst label
+  - closure ownership / automation linkage where applicable
   - payload JSON
 - SIEM-like alerts:
   - source alert ID
   - tenant ID
+  - monitored system ID
   - alert rule
   - severity
   - event timestamp
   - triage status
-  - linked case ID where useful
+  - explicit resolution
+  - linked case ID for incident lineage
+  - review timestamp and analyst where reviewed
   - payload JSON
 - Shuffle-like automation runs:
   - source run ID
@@ -206,6 +220,13 @@ Example source shapes:
   - end timestamp
   - result status
   - related alert or case ID where useful
+  - payload JSON
+- monitored customer systems:
+  - stable system ID
+  - tenant ID
+  - source product
+  - hostname
+  - monitored-from / monitored-to timestamps
   - payload JSON
 
 Verification:
@@ -237,6 +258,7 @@ Likely raw tables:
 - `raw.dfir_iris_cases`
 - `raw.siem_alerts`
 - `raw.shuffle_runs`
+- `raw.customer_systems`
 
 Flow behavior:
 
@@ -255,7 +277,10 @@ Verification:
 
 - run `ingest_raw` locally against `warehouse`
 - confirm raw row counts with `psql`
-- confirm tenant IDs and timestamp columns are populated
+- confirm `occurred_at <= opened_at <= closed_at` when closed
+- confirm reviewed alerts have both reviewer and review timestamp
+- confirm auto-closed incidents have automation linkage
+- confirm monitored-system intervals are valid
 
 ## Phase 6 - Analytics SQL And Build Flow
 
@@ -268,31 +293,35 @@ Deliverables:
 
 The `raw` and `analytics` schemas are provisioned by the Postgres init script
 (`docker/postgres/init/00-init-databases.sh`), so the `sql/analytics/` files own
-only table lifecycle: `001_reset_analytics_tables.sql` drops the tables and
-`010`-`040` rebuild them. There is no separate schema-creation SQL file.
+only table lifecycle: `001_reset_analytics_tables.sql` drops both the old aggregate
+tables and the new prototype KPI outputs, and `010`-`070` rebuild the analytics
+surface. There is no separate schema-creation SQL file.
 
 Analytics outputs:
 
-- BI-facing objects rebuilt from raw
-- simple dashboard-ready metric tables or views
-- tenant-aware aggregations
-- timestamp-based measures using medians or percentiles where applicable
+- BI-facing fact tables rebuilt from raw
+- tenant-aware KPI rollups derived from those facts
+- row-level timestamps preserved in facts, with monthly averages exposed in KPI tables
 
-Initial analytics objects:
+Prototype analytics objects:
 
-- `analytics.case_metrics`
-  - case volume by tenant and severity
-  - open and closed counts
-  - median time to close
-- `analytics.alert_metrics`
-  - alert volume by tenant, severity, rule, and day
-  - triage status counts
-- `analytics.automation_metrics`
-  - automation run counts by tenant and workflow
-  - success/failure counts
-  - median runtime
-- `analytics.soc_daily_summary`
-  - daily rollup combining case, alert, and automation metrics
+- `analytics.fact_incidents`
+  - one row per case with severity, analyst, outcome, closure mode, first-alert lineage,
+    MTTD, and MTTR
+- `analytics.fact_alerts`
+  - one row per alert with source product, system, resolution, reviewer, shift bucket,
+    and linked case
+- `analytics.fact_automation_runs`
+  - one row per automation run with alert/case linkage and auto-close support
+- `analytics.fact_customer_systems`
+  - one row per monitored-system interval for inventory counts
+- `analytics.kpi_monthly`
+  - monthly per-tenant KPI rollup for incidents, TP/FP metrics, escalation, MTTD, MTTR,
+    systems under monitoring, auto-closed incidents, and total alert volume
+- `analytics.alert_volume_by_source_monthly`
+  - monthly per-tenant per-product alert counts
+- `analytics.alert_reviews_by_shift`
+  - shift-date / shift-name / tenant / analyst reviewed-alert counts
 
 Flow behavior:
 
@@ -302,15 +331,19 @@ Flow behavior:
 
 Implementation notes:
 
-- Keep analytics simple and rebuildable.
-- Avoid premature fact/dimension modeling.
+- Keep analytics rebuildable and BI-safe.
+- Treat this as a prototype KPI contract, not a final production warehouse model.
 - Do not let Metabase depend on raw tables for normal dashboards.
+- Derive shifts in SQL using fixed UTC buckets: day 06:00-13:59, evening 14:00-21:59,
+  night 22:00-05:59.
 
 Verification:
 
 - run `build_analytics` locally after `ingest_raw`
 - confirm analytics objects exist in `warehouse.analytics`
-- query row counts and representative metric values with `psql`
+- confirm the old aggregate tables are no longer the intended contract
+- reconcile `kpi_monthly` against the fact tables
+- confirm `metabase_reader` can query `analytics` but not `raw`
 
 ## Phase 7 - Parent Flow And Prefect Deployment
 

@@ -19,13 +19,14 @@ TENANTS = ("tenant-alpha", "tenant-bravo", "tenant-charlie")
 TENANT_CUSTOMER_IDS = {"tenant-alpha": 1, "tenant-bravo": 2, "tenant-charlie": 3}
 SEVERITIES = ("low", "medium", "high", "critical")
 PRODUCTS = ("FortiSIEM", "FortiEDR", "SentinelOne")
+ANALYSTS = ("Tamara", "Elena", "Frederik", "Johannes")
 
 # DFIR-IRIS severity scale is 1..6; map our normalized labels onto it.
 SEVERITY_TO_IRIS_ID = {"low": 2, "medium": 3, "high": 4, "critical": 5}
 
 # Fixed UTC anchor so generated timestamps are byte-stable across runs/machines.
 BASE_TIME = datetime(2026, 1, 1, tzinfo=UTC)
-SPREAD_DAYS = 21
+SPREAD_DAYS = 120
 
 
 def tenant_for(index: int) -> str:
@@ -38,11 +39,15 @@ def severity_for(index: int) -> str:
     return SEVERITIES[index % len(SEVERITIES)]
 
 
-def spread_timestamp(index: int) -> datetime:
+def spread_timestamp(index: int, population_size: int | None = None) -> datetime:
     """Return a tz-aware UTC timestamp spread across ``SPREAD_DAYS`` from *index*."""
+    if population_size is not None and population_size > 1:
+        day_offset = (index * (SPREAD_DAYS - 1)) // (population_size - 1)
+    else:
+        day_offset = index % SPREAD_DAYS
     return BASE_TIME + timedelta(
-        days=index % SPREAD_DAYS,
-        hours=index % 24,
+        days=day_offset,
+        hours=(index * 5) % 24,
         minutes=(index * 7) % 60,
     )
 
@@ -60,6 +65,11 @@ def alert_id(index: int) -> str:
 def run_id(index: int) -> str:
     """Return a stable Shuffle run source id for *index*."""
     return f"SHFL-RUN-{index:05d}"
+
+
+def system_id(index: int) -> str:
+    """Return a stable monitored-system id for *index*."""
+    return f"SYSTEM-{index:05d}"
 
 
 def epoch_ms(moment: datetime) -> int:

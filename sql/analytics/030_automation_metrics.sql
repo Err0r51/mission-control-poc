@@ -1,12 +1,18 @@
-CREATE TABLE analytics.automation_metrics AS
+CREATE TABLE analytics.fact_automation_runs AS
 SELECT
-    tenant_id,
-    workflow_name AS automation_name,
-    COUNT(*)::bigint AS total_run_count,
-    COUNT(*) FILTER (WHERE result_status = 'success')::bigint AS success_run_count,
-    COUNT(*) FILTER (WHERE result_status = 'failure')::bigint AS failure_run_count,
-    percentile_cont(0.5) WITHIN GROUP (
-        ORDER BY EXTRACT(EPOCH FROM (ended_at - started_at))
-    ) AS median_runtime_seconds
-FROM raw.shuffle_runs
-GROUP BY tenant_id, workflow_name;
+    runs.source_run_id,
+    runs.tenant_id,
+    runs.workflow_name,
+    runs.started_at,
+    runs.ended_at,
+    runs.result_status,
+    runs.related_alert_id,
+    runs.related_case_id,
+    (runs.ended_at - runs.started_at) AS runtime_interval,
+    EXTRACT(EPOCH FROM (runs.ended_at - runs.started_at)) AS runtime_seconds,
+    EXISTS (
+        SELECT 1
+        FROM raw.dfir_iris_cases AS cases
+        WHERE cases.auto_closed_by_run_id = runs.source_run_id
+    ) AS auto_closed_incident
+FROM raw.shuffle_runs AS runs;
