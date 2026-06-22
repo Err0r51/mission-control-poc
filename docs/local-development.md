@@ -14,24 +14,26 @@ Step 7 keeps deployment registration and operations inside containers so the che
 2. Register the work pool and the single parent deployment:
 
    ```bash
-   podman compose up prefect-deploy
+   podman compose up --build prefect-deploy
    ```
 
 3. Start the Prefect process worker:
 
    ```bash
-   podman compose up -d prefect-worker
+   podman compose up -d --build prefect-worker
    ```
 
-The `prefect-deploy` service is a one-shot registration container. Re-run it after changes
-to `prefect.yaml` or the parent deployment definition.
+The `prefect-deploy` service is a one-shot registration container. After changing
+`prefect.yaml`, the parent flow code, or any other flow source baked into the worker image,
+rerun both commands above with `--build` so Prefect re-registers fresh deployment metadata
+and the worker runs the rebuilt image.
 
 ## Inspect the registered objects
 
 Inspect the work pool from inside `prefect-server`:
 
 ```bash
-podman compose exec prefect-server prefect work-pool inspect soc-metrics-process
+podman compose exec prefect-server sh -lc 'prefect work-pool inspect "$PREFECT_WORK_POOL"'
 ```
 
 List deployments and confirm only the parent deployment exists:

@@ -32,6 +32,8 @@ services:
     image: prefecthq/prefect:3.7.5-python3.12
     command: ["prefect", "server", "start", "--host", "0.0.0.0", "--port", "4200"]
     environment:
+      PREFECT_API_URL: ${PREFECT_API_URL}
+      PREFECT_WORK_POOL: ${PREFECT_WORK_POOL}
       PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://${PREFECT_DB_USER}:${PREFECT_DB_PASSWORD}@postgres:5432/${PREFECT_DB_NAME}
       PREFECT_UI_API_URL: http://localhost:4200/api
       PREFECT_UI_URL: http://localhost:4200
@@ -92,10 +94,11 @@ services:
       [
         "sh",
         "-c",
-        "prefect work-pool create soc-metrics-process --type process --overwrite --no-prompt && prefect deploy --prefect-file prefect.yaml --name soc_metrics_pipeline/manual --no-prompt",
+        "prefect work-pool create \"$${PREFECT_WORK_POOL}\" --type process --overwrite --no-prompt && prefect deploy --prefect-file prefect.yaml --name soc_metrics_pipeline/manual --no-prompt",
       ]
     environment:
       PREFECT_API_URL: ${PREFECT_API_URL}
+      PREFECT_WORK_POOL: ${PREFECT_WORK_POOL}
     depends_on:
       prefect-server:
         condition: service_healthy

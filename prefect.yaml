@@ -14,4 +14,4 @@ deployments:
     entrypoint: flows.soc_metrics_pipeline.soc_metrics_pipeline
     parameters: {}
     work_pool:
-      name: soc-metrics-process
+      name: "{{ $PREFECT_WORK_POOL }}"
