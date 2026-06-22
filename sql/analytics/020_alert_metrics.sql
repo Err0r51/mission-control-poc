@@ -2,7 +2,7 @@ CREATE TABLE analytics.alert_metrics AS
 SELECT
     (event_at AT TIME ZONE 'UTC')::date AS metric_date,
     tenant_id,
-    detection_name AS alert_category,
+    detection_name,
     severity,
     COUNT(*)::bigint AS total_alert_count,
     COUNT(*) FILTER (WHERE triage_status = 'new')::bigint AS new_alert_count,

@@ -64,10 +64,11 @@ Create the expected layout:
 |   |-- raw/
 |   |   `-- 001_create_raw_tables.sql
 |   `-- analytics/
-|       |-- 001_create_analytics_schema.sql
+|       |-- 001_reset_analytics_tables.sql
 |       |-- 010_case_metrics.sql
 |       |-- 020_alert_metrics.sql
-|       `-- 030_automation_metrics.sql
+|       |-- 030_automation_metrics.sql
+|       `-- 040_soc_daily_summary.sql
 `-- docs/
     |-- local-development.md
     `-- metabase-setup.md
@@ -265,6 +266,11 @@ Deliverables:
 - analytics SQL files in `sql/analytics/`
 - `flows/build_analytics.py`
 
+The `raw` and `analytics` schemas are provisioned by the Postgres init script
+(`docker/postgres/init/00-init-databases.sh`), so the `sql/analytics/` files own
+only table lifecycle: `001_reset_analytics_tables.sql` drops the tables and
+`010`-`040` rebuild them. There is no separate schema-creation SQL file.
+
 Analytics outputs:
 
 - BI-facing objects rebuilt from raw
@@ -369,6 +375,8 @@ Deliverables:
 
 - `docs/metabase-setup.md`
 - read-only Metabase warehouse connection guidance
+- create Metabase admin user
+- connect warehouse database
 - minimal dashboard/query setup instructions
 
 Metabase behavior:
@@ -378,12 +386,6 @@ Metabase behavior:
 - read from `warehouse.analytics`
 - avoid `warehouse.raw` except explicit debugging
 
-Initial dashboard candidates:
-
-- case closure metrics by tenant and severity
-- alert volume trend by tenant and severity
-- automation success rate and median runtime
-- daily SOC summary table
 
 Verification:
 

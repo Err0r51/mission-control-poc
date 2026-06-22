@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from prefect import flow, get_run_logger, task
@@ -11,13 +11,18 @@ from psycopg.types.json import Jsonb
 from db.connection import warehouse_connection
 from db.sql import execute_sql_file
 from mock_sources.dfir_iris import DfirIrisCase, generate_dfir_iris_cases
-from mock_sources.shuffle import ShuffleRun, generate_shuffle_runs as build_shuffle_runs
+from mock_sources.shuffle import ShuffleRun
+from mock_sources.shuffle import generate_shuffle_runs as build_shuffle_runs
 from mock_sources.siem import (
     SecurityAlert,
+)
+from mock_sources.siem import (
     generate_security_alerts as build_security_alerts,
 )
 
-RAW_SQL_PATH = Path(__file__).resolve().parents[1] / "sql" / "raw" / "001_create_raw_tables.sql"
+RAW_SQL_PATH = (
+    Path(__file__).resolve().parents[1] / "sql" / "raw" / "001_create_raw_tables.sql"
+)
 
 TRUNCATE_RAW_TABLES_SQL = """
 TRUNCATE TABLE
@@ -92,7 +97,9 @@ def _dfir_case_row(case: DfirIrisCase, extracted_at: datetime) -> tuple[object, 
     )
 
 
-def _security_alert_row(alert: SecurityAlert, extracted_at: datetime) -> tuple[object, ...]:
+def _security_alert_row(
+    alert: SecurityAlert, extracted_at: datetime
+) -> tuple[object, ...]:
     return (
         alert.source_alert_id,
         alert.tenant_id,
@@ -192,7 +199,9 @@ def load_raw_tables(
 
 
 @task
-def log_ingestion_summary(inserted_counts: dict[str, int], extracted_at: datetime) -> None:
+def log_ingestion_summary(
+    inserted_counts: dict[str, int], extracted_at: datetime
+) -> None:
     """Emit a stable ingestion summary to the Prefect run logs."""
     logger = get_run_logger()
     logger.info(
@@ -212,7 +221,7 @@ def ingest_raw(
 ) -> None:
     """Generate deterministic mock data and reload ``warehouse.raw`` atomically."""
     ensure_raw_schema()
-    extracted_at = datetime.now(timezone.utc)
+    extracted_at = datetime.now(UTC)
     dfir_cases = generate_dfir_cases(dfir_case_count)
     security_alerts = generate_security_alerts(security_alert_count)
     shuffle_runs = generate_shuffle_runs(shuffle_run_count)

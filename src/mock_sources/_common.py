@@ -13,7 +13,7 @@ rate per product). No randomness and no wall-clock are used anywhere.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 TENANTS = ("tenant-alpha", "tenant-bravo", "tenant-charlie")
 TENANT_CUSTOMER_IDS = {"tenant-alpha": 1, "tenant-bravo": 2, "tenant-charlie": 3}
@@ -24,7 +24,7 @@ PRODUCTS = ("FortiSIEM", "FortiEDR", "SentinelOne")
 SEVERITY_TO_IRIS_ID = {"low": 2, "medium": 3, "high": 4, "critical": 5}
 
 # Fixed UTC anchor so generated timestamps are byte-stable across runs/machines.
-BASE_TIME = datetime(2026, 1, 1, tzinfo=timezone.utc)
+BASE_TIME = datetime(2026, 1, 1, tzinfo=UTC)
 SPREAD_DAYS = 21
 
 
