@@ -154,7 +154,7 @@ podman compose exec postgres sh -lc \
 ## Metabase
 
 After the parent flow has created `warehouse.analytics` objects, run the bootstrap service
-above and then follow [docs/metabase-setup.md](/Users/frederikjunge/Developer/mission-control-poc/docs/metabase-setup.md)
+above and then follow [metabase-setup.md](metabase-setup.md)
 for the admin credentials, rerun behavior, and manual dashboard creation path.
 
 The parent run should execute `ingest_raw` first and `build_analytics` second before
