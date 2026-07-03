@@ -6,6 +6,13 @@ DROP TABLE IF EXISTS analytics.fact_automation_runs;
 DROP TABLE IF EXISTS analytics.fact_alerts;
 DROP TABLE IF EXISTS analytics.fact_incidents;
 
+-- Intermediate parse/normalize tables (raw payload -> typed columns).
+DROP TABLE IF EXISTS analytics.stg_case_alert_links;
+DROP TABLE IF EXISTS analytics.stg_systems;
+DROP TABLE IF EXISTS analytics.stg_runs;
+DROP TABLE IF EXISTS analytics.stg_alerts;
+DROP TABLE IF EXISTS analytics.stg_cases;
+
 DROP TABLE IF EXISTS analytics.soc_daily_summary;
 DROP TABLE IF EXISTS analytics.automation_metrics;
 DROP TABLE IF EXISTS analytics.alert_metrics;

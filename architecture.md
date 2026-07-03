@@ -29,12 +29,17 @@ Real source integrations are out of scope.
 
 ## Service layout
 
-The local stack contains:
+The local stack contains four long-running services:
 
 - `postgres`
 - `prefect-server`
 - `prefect-worker`
 - `metabase`
+
+plus two one-shot bootstrap services that run to completion and exit:
+
+- `prefect-deploy` — registers the process work pool and the parent deployment
+- `metabase-bootstrap` — provisions the Metabase admin and the read-only warehouse connection
 
 Redis is not used.
 
@@ -100,29 +105,47 @@ The warehouse uses a two-layer model.
 
 The `raw` schema stores mocked source-shaped extracts and monitored-system inventory.
 
-Raw should be minimal and source-shaped. It should not model the final SOC domain too early.
+Raw is minimal and source-shaped: it must not model the final SOC domain, pre-normalize
+enums, or pre-compute cross-source links. Each raw row carries only the thin routing columns a
+collector genuinely knows at ingest time, plus the full product-native API response as the
+single source of truth.
 
-Typical raw records may include:
+A raw row contains:
 
-- source system
+- source record identifier (primary key)
 - tenant identifier
-- source record identifier, where useful
-- source timestamp, where useful
-- explicit KPI-driving fields where the prototype contract needs them
+- source product, where a collector knows it (alerts, monitored systems)
+- source event time
 - extraction timestamp
-- JSON payload or simple source-shaped columns
+- `payload` — the product-native JSON response, verbatim in the shape the real API returns
+  (real field names, native enum ids, and native timestamp formats, which differ per product:
+  FortiSIEM numeric severity + epoch-ms, FortiEDR text severity + `yyyy-MM-dd HH:mm:ss`,
+  SentinelOne nested `threatInfo` + ISO-microsecond, DFIR-IRIS non-sequential `severity_id`
+  and a `modification_history` audit trail, Shuffle epoch-second executions with a
+  stringified-JSON `execution_argument`)
 
-The raw shape may evolve because the real source payloads are not yet known.
+All normalization (severity, resolution, triage, reviewer, timestamps) and all cross-source
+correlation (alert↔case, host→system, run→case, auto-close) is derived downstream in the
+analytics ETL by parsing the payload — never pre-baked into raw. The payload is the contract
+that a real connector must reproduce, so the parsers written against it keep working when the
+mocks are replaced by real integrations.
 
 ### `analytics`
 
 The `analytics` schema stores BI-facing transformed outputs for the current KPI prototype.
 
-Analytics objects are rebuilt from `raw`.
+Analytics objects are rebuilt from `raw` on every run.
 
 Metabase reads from `analytics`.
 
-Analytics now contains lower-grain, BI-safe fact tables plus KPI rollups:
+Analytics is built in two tiers. First, `stg_*` parse tables normalize each raw payload into
+typed columns and materialize the derived correlations (these are intermediate tables, not part
+of the BI contract — there is no separate `staging` schema):
+
+- `stg_cases`, `stg_alerts`, `stg_runs`, `stg_systems`
+- `stg_case_alert_links` (the derived alert↔case correlation)
+
+Second, the BI-safe fact tables and KPI rollups are built from the `stg_*` tables:
 
 - incident facts
 - alert facts

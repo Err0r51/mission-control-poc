@@ -140,9 +140,21 @@ Commit all changes after each completed implementation step.
 
 Keep mock data deterministic unless randomness is explicitly required.
 
-Keep the raw model source-shaped and minimal.
+Keep the raw model source-shaped and minimal. Each raw table holds only thin routing columns
+(source id, tenant, source product where a collector knows it, source event time, extraction
+time) plus a product-native `payload` JSON that is the single source of truth. Do not add flat,
+pre-normalized, or pre-correlated KPI columns to raw, and do not normalize enums or timestamps
+in the Python generators — the generators must emit payloads in the real API shape.
 
-Keep analytics BI-facing and rebuildable from raw.
+Do all normalization and cross-source correlation in the analytics ETL by parsing the payload.
+Intermediate parse/normalize results are `analytics.stg_*` tables (parse per source, then a
+`stg_case_alert_links` correlation table); the BI-facing facts and rollups build from those.
+This is not a `staging` schema — keep the two-schema (`raw`, `analytics`) boundary.
+
+Keep analytics BI-facing and rebuildable from raw. Treat the seven output tables
+(`fact_incidents`, `fact_alerts`, `fact_automation_runs`, `fact_customer_systems`,
+`kpi_monthly`, `alert_volume_by_source_monthly`, `alert_reviews_by_shift`) as a column-and-type
+contract Metabase binds to; preserve their shapes and value domains even when KPI values change.
 
 Use UTC timestamps and real timestamp types.
 

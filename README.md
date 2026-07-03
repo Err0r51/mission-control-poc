@@ -14,8 +14,8 @@ orchestrates ingestion and analytics in order.
 
 ```text
                   ┌──────────────────────── Prefect ────────────────────────┐
-                  │  soc_metrics_pipeline   (parent flow · manual run)       │
-                  │     ① ingest_raw   ───────────▶   ② build_analytics      │
+                  │  soc_metrics_pipeline   (parent flow · manual run)      │
+                  │     ① ingest_raw   ───────────▶   ② build_analytics    │
                   └────────┬────────────────────────────────┬───────────────┘
                   generate │ + load                  rebuild │ with plain SQL
   src/mock_sources/        ▼                                 ▼
@@ -29,8 +29,9 @@ orchestrates ingestion and analytics in order.
    mock data         └────── one PostgreSQL: prefect │ metabase │ warehouse ──────┘
 ```
 
-1. **Ingest** — `ingest_raw` generates deterministic mock data and truncate-loads it into
-   `warehouse.raw` (source-shaped tables).
+1. **Ingest** — `ingest_raw` generates deterministic mock data and drop-and-recreate loads it
+   into `warehouse.raw` as source-shaped tables (thin routing columns plus a product-native
+   JSON payload).
 2. **Transform** — `build_analytics` rebuilds `warehouse.analytics` from `raw` with plain
    SQL: BI-safe fact tables plus prototype KPI rollups.
 3. **Serve** — Metabase reads `warehouse.analytics` through the read-only `metabase_reader`

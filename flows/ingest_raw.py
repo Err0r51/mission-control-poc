@@ -34,31 +34,14 @@ RAW_SQL_PATH = (
     Path(__file__).resolve().parents[1] / "sql" / "raw" / "001_create_raw_tables.sql"
 )
 
-TRUNCATE_RAW_TABLES_SQL = """
-TRUNCATE TABLE
-    raw.customer_systems,
-    raw.shuffle_runs,
-    raw.siem_alerts,
-    raw.dfir_iris_cases
-"""
-
 INSERT_DFIR_CASES_SQL = """
 INSERT INTO raw.dfir_iris_cases (
     source_case_id,
     tenant_id,
-    severity,
-    status,
-    occurred_at,
-    opened_at,
-    closed_at,
-    case_outcome,
-    assigned_team,
-    assigned_analyst,
-    closed_by,
-    auto_closed_by_run_id,
+    source_event_time,
     extracted_at,
     payload
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+) VALUES (%s, %s, %s, %s, %s)
 """
 
 INSERT_SIEM_ALERTS_SQL = """
@@ -66,33 +49,20 @@ INSERT INTO raw.siem_alerts (
     source_alert_id,
     tenant_id,
     source_product,
-    system_id,
-    detection_name,
-    severity,
-    event_at,
-    triage_status,
-    resolution,
-    linked_case_id,
-    reviewed_at,
-    reviewed_by_analyst,
+    source_event_time,
     extracted_at,
     payload
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+) VALUES (%s, %s, %s, %s, %s, %s)
 """
 
 INSERT_SHUFFLE_RUNS_SQL = """
 INSERT INTO raw.shuffle_runs (
     source_run_id,
     tenant_id,
-    workflow_name,
-    started_at,
-    ended_at,
-    result_status,
-    related_alert_id,
-    related_case_id,
+    source_event_time,
     extracted_at,
     payload
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+) VALUES (%s, %s, %s, %s, %s)
 """
 
 INSERT_CUSTOMER_SYSTEMS_SQL = """
@@ -100,12 +70,10 @@ INSERT INTO raw.customer_systems (
     system_id,
     tenant_id,
     source_product,
-    hostname,
-    monitored_from,
-    monitored_to,
+    source_event_time,
     extracted_at,
     payload
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+) VALUES (%s, %s, %s, %s, %s, %s)
 """
 
 
@@ -120,16 +88,7 @@ def _dfir_case_row(case: DfirIrisCase, extracted_at: datetime) -> tuple[object, 
     return (
         case.source_case_id,
         case.tenant_id,
-        case.severity,
-        case.status,
-        case.occurred_at,
-        case.opened_at,
-        case.closed_at,
-        case.case_outcome,
-        case.assigned_team,
-        case.assigned_analyst,
-        case.closed_by,
-        case.auto_closed_by_run_id,
+        case.source_event_time,
         extracted_at,
         Jsonb(case.payload),
     )
@@ -142,15 +101,7 @@ def _security_alert_row(
         alert.source_alert_id,
         alert.tenant_id,
         alert.source_product,
-        alert.system_id,
-        alert.detection_name,
-        alert.severity,
-        alert.event_at,
-        alert.triage_status,
-        alert.resolution,
-        alert.linked_case_id,
-        alert.reviewed_at,
-        alert.reviewed_by_analyst,
+        alert.source_event_time,
         extracted_at,
         Jsonb(alert.payload),
     )
@@ -160,12 +111,7 @@ def _shuffle_run_row(run: ShuffleRun, extracted_at: datetime) -> tuple[object, .
     return (
         run.source_run_id,
         run.tenant_id,
-        run.workflow_name,
-        run.started_at,
-        run.ended_at,
-        run.result_status,
-        run.related_alert_id,
-        run.related_case_id,
+        run.source_event_time,
         extracted_at,
         Jsonb(run.payload),
     )
@@ -178,9 +124,7 @@ def _customer_system_row(
         customer_system.system_id,
         customer_system.tenant_id,
         customer_system.source_product,
-        customer_system.hostname,
-        customer_system.monitored_from,
-        customer_system.monitored_to,
+        customer_system.source_event_time,
         extracted_at,
         Jsonb(customer_system.payload),
     )
@@ -247,11 +191,14 @@ def load_raw_tables(
     customer_systems: list[CustomerSystem],
     extracted_at: datetime,
 ) -> dict[str, int]:
-    """Atomically replace the current raw tables with the generated data."""
+    """Load the generated data into the freshly (re)created raw tables.
+
+    ``ensure_raw_schema`` drop-and-recreates the raw tables on every run, so they
+    are already empty here; this task only inserts.
+    """
     with warehouse_connection() as conn:
         try:
             with conn.cursor() as cur:
-                cur.execute(TRUNCATE_RAW_TABLES_SQL)
                 cur.executemany(
                     INSERT_DFIR_CASES_SQL,
                     [_dfir_case_row(case, extracted_at) for case in dfir_cases],

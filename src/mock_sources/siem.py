@@ -1,15 +1,20 @@
-"""Deterministic mock generator for security alerts.
+"""Deterministic mock generator for security alerts across three products.
 
-This single source represents the security-alerting feed across the three real
-products in use -- FortiSIEM, FortiEDR, and SentinelOne -- discriminated by the
-``source_product`` column (FortiSIEM aggregates the EDRs in practice, so a
-unified feed is faithful). Columns drive the KPI dashboard (alert volume by
-product / severity / day, true vs false positive rate, escalation-to-case
-rate); ``payload`` carries a light, product-shaped object for realism.
+The security-alert feed spans the three real products in use -- FortiSIEM,
+FortiEDR, and SentinelOne -- discriminated by ``source_product``. Each alert is
+emitted as a **product-native payload** matching the real API response shape
+(field names, enums, and timestamp formats differ per product); the row carries
+only thin routing columns. All normalization (severity, resolution, triage,
+reviewer, host resolution) is done later in the analytics ETL.
 
 Dimensions are decorrelated via mixed-radix so KPI breakdowns are non-degenerate:
 tenant = i%3, product = (i//3)%3, severity = i%4, triage = (i//4)%4,
 resolution = (i//9)%3 -- independent of one another.
+
+Reviewer attribution is deliberately product-faithful: FortiSIEM exposes the
+clearing user only once an incident is cleared; SentinelOne exposes the verdict
+author in its activity feed once a verdict is set; FortiEDR's events API has no
+reviewer field at all (the ETL falls back to the escalated case owner).
 """
 
 from __future__ import annotations
@@ -19,23 +24,23 @@ from datetime import datetime, timedelta
 
 from ._common import (
     ANALYSTS,
+    DEFAULT_ALERT_COUNT,
+    DEFAULT_CASE_COUNT,
+    DEFAULT_CUSTOMER_SYSTEM_COUNT,
     PRODUCTS,
     SEVERITIES,
+    TENANT_CUSTOMER_IDS,
     alert_id,
-    case_id,
+    epoch_ms,
+    fortiedr_timestamp,
+    iso_micros,
     spread_timestamp,
-    system_id,
+    system_hostname,
     tenant_for,
 )
-from .customer_systems import DEFAULT_CUSTOMER_SYSTEM_COUNT
-from .dfir_iris import DEFAULT_CASE_COUNT
 
 TRIAGE_STATUSES = ("new", "in_progress", "escalated", "closed")
 RESOLUTIONS = ("true_positive", "false_positive", "undetermined")
-
-# This source owns the alert cardinality; downstream sources that build foreign
-# keys to alerts (e.g. shuffle runs) import this rather than redeclaring 240.
-DEFAULT_ALERT_COUNT = 240
 
 # Per-product detection labels.
 FORTISIEM_RULES = (
@@ -69,11 +74,13 @@ ATTACK_TACTICS = (
 )
 ATTACK_TECHNIQUES = ("T1078", "T1059", "T1068", "T1071", "T1486")
 
-# Normalized severity -> product-native representations.
+# Normalized severity -> FortiSIEM numeric score (1-10) + category. The ETL
+# recovers the 4 levels from the numeric score; categories alone would collapse
+# high and critical, so the number is what carries the fidelity.
 _FORTISIEM_SEVERITY = {
-    "low": (2, "LOW"),
-    "medium": (5, "MEDIUM"),
-    "high": (8, "HIGH"),
+    "low": (3, "LOW"),
+    "medium": (6, "MEDIUM"),
+    "high": (9, "HIGH"),
     "critical": (10, "HIGH"),
 }
 _FORTIEDR_SEVERITY = {
@@ -82,6 +89,7 @@ _FORTIEDR_SEVERITY = {
     "high": "High",
     "critical": "Critical",
 }
+# SentinelOne's threats API has no discrete severity, only a 2-level confidence.
 _S1_CONFIDENCE = {
     "low": "suspicious",
     "medium": "suspicious",
@@ -93,79 +101,150 @@ _S1_VERDICT = {
     "false_positive": "false_positive",
     "undetermined": "undefined",
 }
+# FortiSIEM incident disposition (incidentReso).
+_FORTISIEM_RESO = {"true_positive": 2, "false_positive": 3, "undetermined": 1}
+# FortiEDR classification.
+_FORTIEDR_CLASS = {
+    "true_positive": "Malicious",
+    "false_positive": "Safe",
+    "undetermined": "PUP",
+}
+# SentinelOne threat lifecycle from the triage dimension.
+_S1_INCIDENT_STATUS = ("unresolved", "in_progress", "in_progress", "resolved")
 
 
 @dataclass(frozen=True, slots=True)
 class SecurityAlert:
-    """A mocked security alert from FortiSIEM, FortiEDR, or SentinelOne."""
+    """A mocked security alert: thin routing fields plus the native payload."""
 
     source_alert_id: str
     tenant_id: str
     source_product: str
-    system_id: str
-    detection_name: str
-    severity: str
-    event_at: datetime
-    triage_status: str
-    resolution: str
-    linked_case_id: str | None
-    reviewed_at: datetime | None
-    reviewed_by_analyst: str | None
+    source_event_time: datetime
     payload: dict[str, object]
 
 
 def _fortisiem_payload(
-    index: int, name: str, severity: str, tenant: str, triage: str, resolution: str
-) -> dict:
+    index: int,
+    name: str,
+    severity: str,
+    tenant: str,
+    resolution: str,
+    is_cleared: bool,
+    hostname: str,
+    event_at: datetime,
+    reviewer: str | None,
+    reviewed_at: datetime | None,
+) -> dict[str, object]:
     score, category = _FORTISIEM_SEVERITY[severity]
-    reso = {"true_positive": 2, "false_positive": 3, "undetermined": 4}[resolution]
-    status = 2 if triage == "closed" else 0
     return {
         "incidentId": 100000 + index,
         "incidentTitle": name,
+        "eventType": "PH_RULE_SECURITY",
         "eventSeverity": score,
         "eventSeverityCat": category,
-        "incidentStatus": status,
-        "incidentReso": reso,
+        "incidentStatus": 2 if is_cleared else 0,
+        "incidentReso": _FORTISIEM_RESO[resolution],
+        "incidentFirstSeen": epoch_ms(event_at),
+        "incidentLastSeen": epoch_ms(event_at),
+        "incidentTarget": f"hostIpAddr:10.10.0.{index % 250}, hostName:{hostname}",
+        "incidentRptDevName": "FortiSIEM-Supervisor",
+        "incidentClearedUser": reviewer if is_cleared else None,
+        "incidentClearedTime": (
+            epoch_ms(reviewed_at) if is_cleared and reviewed_at else None
+        ),
         "attackTactic": ATTACK_TACTICS[index % 5],
         "attackTechnique": ATTACK_TECHNIQUES[index % 5],
         "customer": tenant,
+        "phCustId": TENANT_CUSTOMER_IDS[tenant],
+        "count": 1 + index % 7,
     }
 
 
-def _fortiedr_payload(index: int, name: str, severity: str, resolution: str) -> dict:
-    classification = {
-        "true_positive": "Malicious",
-        "false_positive": "Safe",
-        "undetermined": "PUP",
-    }[resolution]
+def _fortiedr_payload(
+    index: int,
+    name: str,
+    severity: str,
+    resolution: str,
+    is_cleared: bool,
+    hostname: str,
+    event_at: datetime,
+) -> dict[str, object]:
+    stamp = fortiedr_timestamp(event_at)
     return {
-        "eventId": 400000 + index,
+        "eventId": str(400000 + index),
         "rawDataId": 1270000000 + index,
-        "classification": classification,
+        "eventTime": stamp,
+        "firstSeen": stamp,
+        "lastSeen": stamp,
+        "classification": _FORTIEDR_CLASS[resolution],
         "severity": _FORTIEDR_SEVERITY[severity],
+        "action": "Block" if severity in ("high", "critical") else "Log",
+        "handled": is_cleared,
         "process": name,
-        "deviceName": f"host-{index % 20}",
-        "action": "Blocked" if severity in ("high", "critical") else "Logged",
+        "processName": name,
+        "deviceName": hostname,
+        "deviceId": f"DVC-{index:06d}",
+        "collectorId": f"COL-{index % DEFAULT_CUSTOMER_SYSTEM_COUNT:04d}",
+        "agentId": f"AGT-{index % DEFAULT_CUSTOMER_SYSTEM_COUNT:04d}",
+        "threatDetails": {
+            "threatName": name,
+            "threatFamily": "Generic",
+            "threatType": "Process",
+        },
     }
 
 
 def _sentinelone_payload(
-    index: int, name: str, severity: str, triage: str, resolution: str
-) -> dict:
-    mitigation = "mitigated" if triage == "closed" else "active"
-    return {
-        "threatInfo": {
-            "threatName": name,
-            # Decorrelate classification from tenant (index % 3) via a higher digit.
-            "classification": ("Malware", "Ransomware", "PUA")[(index // 27) % 3],
-            "confidenceLevel": _S1_CONFIDENCE[severity],
-            "mitigationStatus": mitigation,
-            "analystVerdict": _S1_VERDICT[resolution],
-            "detectionType": "static" if index % 2 == 0 else "dynamic",
-        },
-        "agentRealtimeInfo": {"agentComputerName": f"host-{index % 20}"},
+    index: int,
+    name: str,
+    severity: str,
+    triage_index: int,
+    resolution: str,
+    hostname: str,
+    event_at: datetime,
+    has_verdict: bool,
+    reviewer: str | None,
+    reviewed_at: datetime | None,
+) -> dict[str, object]:
+    created = iso_micros(event_at)
+    updated = iso_micros(reviewed_at) if reviewed_at is not None else created
+    threat_info = {
+        "threatId": f"{7000000000 + index}",
+        "threatName": name,
+        # Decorrelate classification from tenant (index % 3) via a higher digit.
+        "classification": ("Malware", "Ransomware", "PUA")[(index // 27) % 3],
+        "classificationSource": "Engine",
+        "confidenceLevel": _S1_CONFIDENCE[severity],
+        "analystVerdict": _S1_VERDICT[resolution] if has_verdict else "undefined",
+        "incidentStatus": _S1_INCIDENT_STATUS[triage_index],
+        "mitigationStatus": "mitigated" if triage_index == 3 else "active",
+        "createdAt": created,
+        "updatedAt": updated,
     }
+    payload: dict[str, object] = {
+        "id": f"S1-{index:012d}",
+        "threatId": f"{7000000000 + index}",
+        "agentId": f"{index % DEFAULT_CUSTOMER_SYSTEM_COUNT}",
+        "createdAt": created,
+        "updatedAt": updated,
+        "identifiedAt": created,
+        "threatInfo": threat_info,
+        "agentRealtimeInfo": {
+            "agentId": f"{index % DEFAULT_CUSTOMER_SYSTEM_COUNT}",
+            "agentComputerName": hostname,
+            "agentOsType": "windows",
+        },
+        "agentDetectionInfo": {"agentIpV4": f"10.20.0.{index % 250}"},
+    }
+    # The verdict author lives in the Activities feed, not on the threat object.
+    if has_verdict and reviewer is not None:
+        payload["threatTimeline"] = {
+            "username": reviewer,
+            "newAnalystVerdict": _S1_VERDICT[resolution],
+            "updatedAt": updated,
+        }
+    return payload
 
 
 def _build_alert(
@@ -178,60 +257,43 @@ def _build_alert(
     tenant = tenant_for(index)
     product = PRODUCTS[(index // 3) % 3]
     severity = SEVERITIES[index % 4]
-    triage = TRIAGE_STATUSES[(index // 4) % 4]
+    triage_index = (index // 4) % 4
+    is_new = triage_index == 0
+    is_cleared = triage_index == 3
     event_at = spread_timestamp(index, alert_count)
-    resolution = (
-        "undetermined" if triage == "new" else RESOLUTIONS[(index // 9) % 3]
-    )
-    linked_case_id = case_id(index % case_count) if case_count > 0 else None
+    resolution = "undetermined" if is_new else RESOLUTIONS[(index // 9) % 3]
+
+    system_count = customer_system_count if customer_system_count > 0 else 1
+    hostname = system_hostname(index % system_count)
+
     reviewed_at = (
-        event_at + timedelta(minutes=20 + (index % 6) * 35)
-        if triage != "new"
-        else None
+        event_at + timedelta(minutes=20 + (index % 6) * 35) if not is_new else None
     )
-    reviewed_by_analyst = (
-        ANALYSTS[(index // 12) % 4]
-        if reviewed_at is not None
-        else None
-    )
-    monitored_system_id = (
-        system_id(index % customer_system_count)
-        if customer_system_count > 0
-        else system_id(index)
-    )
+    reviewer = ANALYSTS[(index // 12) % 4] if not is_new else None
 
     if product == "FortiSIEM":
         name = FORTISIEM_RULES[index % 5]
-        payload: dict[str, object] = _fortisiem_payload(
-            index, name, severity, tenant, triage, resolution
+        payload = _fortisiem_payload(
+            index, name, severity, tenant, resolution,
+            is_cleared, hostname, event_at, reviewer, reviewed_at,
         )
     elif product == "FortiEDR":
         name = FORTIEDR_PROCESSES[index % 5]
-        payload = _fortiedr_payload(index, name, severity, resolution)
+        payload = _fortiedr_payload(
+            index, name, severity, resolution, is_cleared, hostname, event_at
+        )
     else:
         name = SENTINELONE_THREATS[index % 5]
-        payload = _sentinelone_payload(index, name, severity, triage, resolution)
-
-    payload["system_id"] = monitored_system_id
-    payload["reviewed_at"] = (
-        reviewed_at.isoformat() if reviewed_at is not None else None
-    )
-    payload["reviewed_by"] = reviewed_by_analyst
-    payload["linked_case_id"] = linked_case_id
+        payload = _sentinelone_payload(
+            index, name, severity, triage_index, resolution, hostname,
+            event_at, not is_new, reviewer, reviewed_at,
+        )
 
     return SecurityAlert(
         source_alert_id=alert_id(index),
         tenant_id=tenant,
         source_product=product,
-        system_id=monitored_system_id,
-        detection_name=name,
-        severity=severity,
-        event_at=event_at,
-        triage_status=triage,
-        resolution=resolution,
-        linked_case_id=linked_case_id,
-        reviewed_at=reviewed_at,
-        reviewed_by_analyst=reviewed_by_analyst,
+        source_event_time=event_at,
         payload=payload,
     )
 

@@ -1,3 +1,5 @@
+-- Monitored-system facts from the parsed system staging table.
+
 CREATE TABLE analytics.fact_customer_systems AS
 SELECT
     system_id,
@@ -7,4 +9,4 @@ SELECT
     monitored_from,
     monitored_to,
     (monitored_to IS NULL) AS still_monitored
-FROM raw.customer_systems;
+FROM analytics.stg_systems;

@@ -109,25 +109,58 @@ podman compose exec postgres sh -lc \
    UNION ALL SELECT '\''customer_systems'\'', count(*) FROM raw.customer_systems;"'
 ```
 
-Confirm KPI-driving raw fields are populated and internally consistent:
+Confirm raw is source-shaped: each row is thin routing columns plus the product-native
+`payload`. Normalized and correlated fields (severity labels, resolution, reviewer, linked case,
+resolved system) are **not** in raw — they are derived downstream in the analytics ETL. Inspect
+a full DFIR-IRIS case payload (real IRIS field names, non-sequential `severity_id`, and the
+`modification_history` audit trail):
 
 ```bash
 podman compose exec postgres sh -lc \
   'psql -U "$POSTGRES_USER" -d "$WAREHOUSE_DB_NAME" -c "
-   SELECT source_case_id, occurred_at, opened_at, closed_at, case_outcome, auto_closed_by_run_id
+   SELECT source_case_id, tenant_id, source_event_time, jsonb_pretty(payload)
    FROM raw.dfir_iris_cases
-   ORDER BY source_case_id
-   LIMIT 5;"'
+   WHERE source_case_id = '\''IRIS-CASE-00003'\'';"'
 ```
 
+Inspect one alert payload per product to confirm each is in its real API shape (FortiSIEM
+numeric `eventSeverity` + epoch-ms; FortiEDR text `severity` + `yyyy-MM-dd HH:mm:ss`;
+SentinelOne nested `threatInfo` + ISO-microsecond timestamps):
+
 ```bash
 podman compose exec postgres sh -lc \
   'psql -U "$POSTGRES_USER" -d "$WAREHOUSE_DB_NAME" -c "
-   SELECT source_alert_id, reviewed_at, reviewed_by_analyst, system_id
+   SELECT source_product, jsonb_pretty(payload)
    FROM raw.siem_alerts
-   WHERE reviewed_at IS NOT NULL
-   ORDER BY source_alert_id
-   LIMIT 5;"'
+   WHERE source_alert_id IN ('\''ALERT-000000'\'','\''ALERT-000003'\'','\''ALERT-000006'\'');"'
+```
+
+Confirm the ETL parsed the payloads and materialized the correlations in the `analytics.stg_*`
+tables (parse per source, plus the derived alert↔case link):
+
+```bash
+podman compose exec postgres sh -lc \
+  'psql -U "$POSTGRES_USER" -d "$WAREHOUSE_DB_NAME" -c "
+   SELECT '\''stg_cases'\'' AS object_name, count(*) FROM analytics.stg_cases
+   UNION ALL SELECT '\''stg_alerts'\'', count(*) FROM analytics.stg_alerts
+   UNION ALL SELECT '\''stg_runs'\'', count(*) FROM analytics.stg_runs
+   UNION ALL SELECT '\''stg_systems'\'', count(*) FROM analytics.stg_systems
+   UNION ALL SELECT '\''stg_case_alert_links'\'', count(*) FROM analytics.stg_case_alert_links;"'
+```
+
+Spot-check that `system_id` was resolved by the hostname join (no unresolved rows) and that
+detection latency (MTTD) is well-defined and positive for every incident:
+
+```bash
+podman compose exec postgres sh -lc \
+  'psql -U "$POSTGRES_USER" -d "$WAREHOUSE_DB_NAME" -c "
+   SELECT count(*) AS alerts,
+          count(*) FILTER (WHERE system_id IS NULL) AS unresolved_system_id
+   FROM analytics.fact_alerts;
+   SELECT count(*) FILTER (WHERE mttd_minutes IS NOT NULL) AS mttd_defined,
+          round(min(mttd_minutes), 1) AS mttd_min,
+          round(max(mttd_minutes), 1) AS mttd_max
+   FROM analytics.fact_incidents;"'
 ```
 
 Analytics row counts and representative KPI queries:
